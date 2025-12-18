@@ -199,7 +199,7 @@ Sample Output
 
 <img width="1199" height="420" alt="image" src="https://github.com/user-attachments/assets/35ea2dd0-490a-4a22-8b85-c5eb9e4328f0" />
 
-<img width="900" height="364" alt="image" src="https://github.com/user-attachments/assets/cecb8e46-ccaa-4152-be6a-5199d97686ca" />
+<img width="1450" height="400" alt="image" src="https://github.com/user-attachments/assets/205cca6e-cde9-4662-bcf4-710f10a785d2" />
 
 <img width="679" height="336" alt="image" src="https://github.com/user-attachments/assets/efd50d0c-5459-4bb0-bf09-3095e76d939c" />
 
