@@ -196,6 +196,6 @@ Sample Output
 
 
 
-This work is inspired and informed from my time at as a resaercher @ThinkstCanary 💚 `https://canary.tools/`
+This work is inspired and informed from my time at as a researcher @ThinkstCanary 💚 `https://canary.tools/`
 
 
