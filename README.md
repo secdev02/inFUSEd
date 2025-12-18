@@ -60,7 +60,7 @@ csc ProjFS-Service.cs
    Disable-WindowsOptionalFeature -Online -FeatureName "Client-ProjFS"
    ```
 
-## Configuration (App.config)
+## Configuration (ProjFS-Service.exe.config)
 
 - **RootPath** - Virtual file system location (default: C:\Secrets)
 - **AlertDomain** - DNS domain for alerts
@@ -94,7 +94,7 @@ The ProjFS Service now supports dynamic file structure and content generation us
 
 ## Configuration
 
-### App.config Settings
+### ProjFS-Service.exe.config Settings
 
 1. **UseApiForStructure** (true/false)
    - When true, the service will call Claude API to generate the file system structure instead of using the static FileSystemData in the config
@@ -149,7 +149,7 @@ When UseApiForContent is enabled, Claude will generate realistic file content wh
 <add key="UseApiForStructure" value="false" />
 <add key="UseApiForContent" value="false" />
 ```
-Uses the FileSystemData from App.config and generic placeholder content.
+Uses the FileSystemData from ProjFS-Service.exe.config and generic placeholder content.
 
 ### Mode 2: API-Generated Structure, Static Content
 ```xml
@@ -185,7 +185,7 @@ Claude generates both the file structure and content dynamically, creating a hig
 
 ## Security Considerations
 
-- Store your API key securely in the App.config
+- Store your API key securely in the ProjFS-Service.exe.config
 - Consider using Windows DPAPI or other encryption for the config file
 - Monitor API usage to prevent unexpected costs
 - The API key should have appropriate rate limits configured
