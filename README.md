@@ -192,7 +192,10 @@ Claude generates both the file structure and content dynamically, creating a hig
 
 Sample Output 
 
-<img width="1043" height="621" alt="image" src="https://github.com/user-attachments/assets/a5a73e1f-f125-4de2-8cb3-c6a88cf1488e" />
+
+<img width="985" height="308" alt="image" src="https://github.com/user-attachments/assets/43329048-a783-4395-bd75-52ed00633a69" />
+
+<img width="806" height="266" alt="image" src="https://github.com/user-attachments/assets/ab0697d1-769f-4913-995e-98afbcb5e9c5" />
 
 <img width="1199" height="420" alt="image" src="https://github.com/user-attachments/assets/35ea2dd0-490a-4a22-8b85-c5eb9e4328f0" />
 
