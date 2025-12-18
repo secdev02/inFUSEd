@@ -1,9 +1,93 @@
 # inFUSEd
 Deception Based File System - Based on ProjFS - AI Capable Content Generation 
 
+# Windows ProjFS Virtual File System Service
 
+## Description
+
+Windows service that creates a virtual file system using the Windows Projected File System (ProjFS) API. Monitors file access attempts and sends DNS alerts when virtual files are accessed.
+
+## Dependencies
+
+- .NET Framework 4.8 or higher
+- Windows 10 version 1809 (build 17763) or later
+- Windows Server 2019 or later
+- ProjectedFSLib.dll (Windows system library)
+- Windows Projected File System feature must be enabled
+- A Canarytoken DNS for alerting or WebHook
+
+## Compilation
+
+```bash
+csc ProjFS-Service.cs
+```
+
+## Installation
+
+1. Enable Windows Projected File System feature:
+   ```powershell
+   Enable-WindowsOptionalFeature -Online -FeatureName "Client-ProjFS"
+   ```
+
+2. Install the service (run as Administrator):
+   ```cmd
+   C:\Windows\Microsoft.NET\Framework\v4.0.30319\InstallUtil.exe ProjFS-Service.exe
+   ```
+
+3. Start the service:
+   ```cmd
+   net start WindowsFakeFileSystem
+   ```
+
+## Uninstallation
+
+1. Stop the service:
+   ```cmd
+   net stop WindowsFakeFileSystem
+   ```
+
+2. Uninstall the service (run as Administrator):
+   ```cmd
+   C:\Windows\Microsoft.NET\Framework\v4.0.30319\InstallUtil.exe /u ProjFS-Service.exe
+   ```
+   OR
+   ```cmd
+   sc delete WindowsFakeFileSystem
+   ```
+
+3. Optionally disable ProjFS feature:
+   ```powershell
+   Disable-WindowsOptionalFeature -Online -FeatureName "Client-ProjFS"
+   ```
+
+## Configuration (App.config)
+
+- **RootPath** - Virtual file system location (default: C:\Secrets)
+- **AlertDomain** - DNS domain for alerts
+- **DebugMode** - Enable debug output (true/false)
+
+## Console Mode (for testing)
+
+Minimalist file structures.
+
+```cmd
+ProjFS-Service.exe /console
+```
+
+## Notes
+
+- Service runs as LocalSystem by default
+- Virtual files are created on-demand, folder may appear empty
+- DNS alerts use Base32 encoding for file/process information
+- Ensure firewall allows DNS queries for alerting functionality
+
+## License
+
+MIT License
 
 # Claude API Integration for ProjFS Service
+
+
 
 ## Overview
 The ProjFS Service now supports dynamic file structure and content generation using the Claude API.
@@ -105,3 +189,13 @@ Claude generates both the file structure and content dynamically, creating a hig
 - Consider using Windows DPAPI or other encryption for the config file
 - Monitor API usage to prevent unexpected costs
 - The API key should have appropriate rate limits configured
+
+Sample Output 
+
+<img width="1043" height="621" alt="image" src="https://github.com/user-attachments/assets/a5a73e1f-f125-4de2-8cb3-c6a88cf1488e" />
+
+
+
+This work is inspired and informed from my time at as a resaercher @ThinkstCanary 💚 `https://canary.tools/`
+
+
