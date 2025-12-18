@@ -140,7 +140,18 @@ namespace WindowsFakeFileSystemService
                 
                 if (useApiForStructure && !string.IsNullOrEmpty(apiKey))
                 {
-                    csvData = ClaudeApiHelper.GenerateFileStructure(apiKey).Result;
+                    string apiGeneratedData = ClaudeApiHelper.GenerateFileStructure(apiKey).Result;
+                    
+                    if (!string.IsNullOrEmpty(apiGeneratedData) && !apiGeneratedData.StartsWith("Error"))
+                    {
+                        csvData = apiGeneratedData;
+                    }
+                }
+                
+                if (string.IsNullOrEmpty(csvData))
+                {
+                    EventLog.WriteEntry("WindowsFakeFileSystem", "No file system data available", EventLogEntryType.Error);
+                    return;
                 }
                 
                 Guid guid = Guid.NewGuid();
@@ -209,8 +220,26 @@ namespace WindowsFakeFileSystemService
                 if (useApiForStructure && !string.IsNullOrEmpty(apiKey))
                 {
                     Console.WriteLine("Generating file structure using Claude API...");
-                    csvData = ClaudeApiHelper.GenerateFileStructure(apiKey).Result;
-                    Console.WriteLine("File structure generated.");
+                    string apiGeneratedData = ClaudeApiHelper.GenerateFileStructure(apiKey).Result;
+                    
+                    if (!string.IsNullOrEmpty(apiGeneratedData) && !apiGeneratedData.StartsWith("Error"))
+                    {
+                        csvData = apiGeneratedData;
+                        Console.WriteLine("File structure generated.");
+                    }
+                    else
+                    {
+                        Console.WriteLine("API failed to generate structure, using fallback data from config.");
+                        Console.WriteLine("API Error: " + apiGeneratedData);
+                    }
+                }
+                
+                if (string.IsNullOrEmpty(csvData))
+                {
+                    Console.WriteLine("ERROR: No file system data available!");
+                    Console.WriteLine("Press any key to exit.");
+                    Console.ReadKey();
+                    return;
                 }
                 
                 var provider = new ProjFSProvider(rootPath, csvData, alertDomain, debugMode, useApiForContent, apiKey);
@@ -227,6 +256,7 @@ namespace WindowsFakeFileSystemService
             catch (Exception ex)
             {
                 Console.WriteLine("Error: " + ex.Message);
+                Console.WriteLine("Stack Trace: " + ex.StackTrace);
                 if (ex is Win32Exception)
                 {
                     Console.WriteLine("Win32 Error Code: " + ((Win32Exception)ex).NativeErrorCode);
@@ -296,40 +326,89 @@ namespace WindowsFakeFileSystemService
 
         private void LoadFileSystemFromCsvString(string csvStr)
         {
+            if (string.IsNullOrEmpty(csvStr))
+            {
+                Console.WriteLine("Warning: CSV data is empty!");
+                return;
+            }
+
+            if (enableDebug)
+            {
+                Console.WriteLine("CSV Data Length: " + csvStr.Length);
+                Console.WriteLine("First 200 chars: " + (csvStr.Length > 200 ? csvStr.Substring(0, 200) : csvStr));
+            }
+
             string[] lines = csvStr.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            int lineCount = 0;
+            int validCount = 0;
+
             foreach (var line in lines)
             {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                
+                lineCount++;
                 var parts = line.Split(',');
-                if (parts.Length != 4) continue;
-
-                string path = parts[0].TrimStart('\\');
-                string name = Path.GetFileName(path);
-                string parentPath = Path.GetDirectoryName(path);
-                bool isDirectory = bool.Parse(parts[1]);
-                long fileSize = long.Parse(parts[2]);
-
-                long unixTimestamp = long.Parse(parts[3]);
-                DateTime lastWriteTime = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(unixTimestamp);
-
-                if (string.IsNullOrEmpty(parentPath))
+                
+                if (parts.Length != 4)
                 {
-                    parentPath = "\\";
+                    if (enableDebug)
+                    {
+                        Console.WriteLine(string.Format("Skipping invalid line {0}: {1}", lineCount, line));
+                    }
+                    continue;
                 }
 
-                if (!fileSystem.ContainsKey(parentPath))
+                try
                 {
-                    fileSystem[parentPath] = new List<FileEntry>();
-                }
+                    string path = parts[0].TrimStart('\\');
+                    string name = Path.GetFileName(path);
+                    string parentPath = Path.GetDirectoryName(path);
+                    bool isDirectory = bool.Parse(parts[1]);
+                    long fileSize = long.Parse(parts[2]);
 
-                fileSystem[parentPath].Add(new FileEntry
+                    long unixTimestamp = long.Parse(parts[3]);
+                    DateTime lastWriteTime = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(unixTimestamp);
+
+                    if (string.IsNullOrEmpty(parentPath))
+                    {
+                        parentPath = "\\";
+                    }
+
+                    if (!fileSystem.ContainsKey(parentPath))
+                    {
+                        fileSystem[parentPath] = new List<FileEntry>();
+                    }
+
+                    fileSystem[parentPath].Add(new FileEntry
+                    {
+                        Name = name,
+                        IsDirectory = isDirectory,
+                        FileSize = fileSize,
+                        LastWriteTime = lastWriteTime,
+                        Opened = false,
+                        LastAlert = 0
+                    });
+
+                    validCount++;
+                }
+                catch (Exception ex)
                 {
-                    Name = name,
-                    IsDirectory = isDirectory,
-                    FileSize = fileSize,
-                    LastWriteTime = lastWriteTime,
-                    Opened = false,
-                    LastAlert = 0
-                });
+                    if (enableDebug)
+                    {
+                        Console.WriteLine(string.Format("Error parsing line {0}: {1} - {2}", lineCount, line, ex.Message));
+                    }
+                }
+            }
+
+            Console.WriteLine(string.Format("Loaded {0} valid entries from {1} lines", validCount, lineCount));
+            
+            if (enableDebug)
+            {
+                Console.WriteLine("File system paths:");
+                foreach (var key in fileSystem.Keys)
+                {
+                    Console.WriteLine(string.Format("  {0}: {1} entries", key, fileSystem[key].Count));
+                }
             }
         }
 
@@ -647,26 +726,20 @@ namespace WindowsFakeFileSystemService
     {
         public static async Task<string> GenerateFileStructure(string apiKey)
         {
-            string prompt = @"Generate a CSV-formatted file system structure for a corporate IT environment honeypot. 
-Format: path,isDirectory,fileSize,unixTimestamp
-Example: \Network\Config.pdf,false,5000,1743942586
-
-Create a realistic structure with 20-30 files across folders like:
-- Network
-- Server
-- Security
-- Databases
-- Backups
-
-Make file names look like real corporate documents (configurations, reports, policies, etc.).
-Only output the CSV data, nothing else.";
+            string prompt = "Generate CSV data for a corporate IT honeypot file system. Format: path,isDirectory,fileSize,unixTimestamp. Example: \\Network,true,0,1743942586 and \\Network\\Config.pdf,false,5000,1743942586. Create 20-30 realistic corporate files in folders like Network, Server, Security, Databases. Use backslash for paths. Output only CSV lines, no explanation.";
 
             return await CallClaudeApi(apiKey, prompt);
         }
 
         public static async Task<string> GenerateFileContent(string apiKey, string fileName, string fileExtension, string fullPath)
         {
-            string prompt = string.Format("Generate realistic content for a file named '{0}' with extension '{1}' located at '{2}'. This is part of a corporate IT honeypot. Make the content look authentic and convincing as if it were a real corporate document. Output only the file content, no preamble or explanation.", fileName, fileExtension, fullPath);
+            string prompt = string.Concat(new string[] {
+                "Generate realistic content for corporate file: ",
+                fileName,
+                " (extension: ",
+                fileExtension,
+                "). Make it look like a real corporate document. Output only the file content."
+            });
 
             return await CallClaudeApi(apiKey, prompt);
         }
@@ -675,24 +748,43 @@ Only output the CSV data, nothing else.";
         {
             try
             {
+                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | (SecurityProtocolType)3072;
+                
                 using (var client = new WebClient())
                 {
                     client.Headers.Add("x-api-key", apiKey);
                     client.Headers.Add("anthropic-version", "2023-06-01");
                     client.Headers.Add("content-type", "application/json");
 
-                    string requestBody = string.Format(@"{{
-    ""model"": ""claude-sonnet-4-20250514"",
-    ""max_tokens"": 4000,
-    ""messages"": [
-        {{
-            ""role"": ""user"",
-            ""content"": ""{0}""
-        }}
-    ]
-}}", prompt.Replace("\"", "\\\"").Replace("\r\n", "\\n").Replace("\n", "\\n"));
+                    string escapedPrompt = prompt.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r\n", "\\n").Replace("\r", "\\n").Replace("\n", "\\n").Replace("\t", "\\t");
+                    
+                    string requestBody = string.Concat(new string[] {
+                        "{\"model\":\"claude-sonnet-4-20250514\",\"max_tokens\":4000,\"messages\":[{\"role\":\"user\",\"content\":\"",
+                        escapedPrompt,
+                        "\"}]}"
+                    });
 
-                    string response = await Task.Run(() => client.UploadString("https://api.anthropic.com/v1/messages", requestBody));
+                    Console.WriteLine("Request body length: " + requestBody.Length);
+                    
+                    string response = "";
+                    try
+                    {
+                        response = await Task.Run(() => client.UploadString("https://api.anthropic.com/v1/messages", requestBody));
+                    }
+                    catch (WebException webEx)
+                    {
+                        if (webEx.Response != null)
+                        {
+                            using (var reader = new System.IO.StreamReader(webEx.Response.GetResponseStream()))
+                            {
+                                string errorResponse = reader.ReadToEnd();
+                                Console.WriteLine("API Error Response: " + errorResponse);
+                            }
+                        }
+                        throw;
+                    }
+                    
+                    Console.WriteLine("Raw API response length: " + response.Length);
                     
                     int contentStart = response.IndexOf("\"text\":\"") + 8;
                     int contentEnd = response.IndexOf("\"", contentStart);
@@ -706,6 +798,27 @@ Only output the CSV data, nothing else.";
                     {
                         string content = response.Substring(contentStart, contentEnd - contentStart);
                         content = content.Replace("\\n", "\n").Replace("\\\"", "\"").Replace("\\\\", "\\");
+                        
+                        content = content.Trim();
+                        if (content.StartsWith("```csv"))
+                        {
+                            content = content.Substring(6);
+                        }
+                        else if (content.StartsWith("```"))
+                        {
+                            content = content.Substring(3);
+                        }
+                        
+                        if (content.EndsWith("```"))
+                        {
+                            content = content.Substring(0, content.Length - 3);
+                        }
+                        
+                        content = content.Trim();
+                        
+                        Console.WriteLine("Extracted content length: " + content.Length);
+                        Console.WriteLine("First 300 chars: " + (content.Length > 300 ? content.Substring(0, 300) : content));
+                        
                         return content;
                     }
                     
@@ -714,6 +827,8 @@ Only output the CSV data, nothing else.";
             }
             catch (Exception ex)
             {
+                Console.WriteLine("Error calling Claude API: " + ex.Message);
+                Console.WriteLine("Stack trace: " + ex.StackTrace);
                 return "Error calling Claude API: " + ex.Message;
             }
         }
