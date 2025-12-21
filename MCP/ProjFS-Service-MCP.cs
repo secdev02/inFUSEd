@@ -281,7 +281,7 @@ namespace WindowsFakeFileSystemService
         
         // MCP Server
         private bool mcpRunning = false;
-        //private Thread mcpServerThread;
+        private Thread mcpServerThread;
 
         public ProjFSProvider(string rootPath, string csvStr, string alertDomain, bool enableDebug, bool autoSave)
         {

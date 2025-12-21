@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "projfs": {
+      "command": "python",
+      "args": [
+        "C:\\Users\\YourUsername\\Downloads\\projfs_mcp_server.py"
+      ],
+      "env": {
+        "PROJFS_PIPE_NAME": "\\\\.\\pipe\\ProjFS_MCP_Pipe"
+      }
+    }
+  }
+}

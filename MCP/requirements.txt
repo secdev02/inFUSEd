@@ -1,0 +1,13 @@
+# ProjFS MCP Server Requirements
+
+# MCP SDK
+mcp>=0.9.0
+
+# Windows Named Pipe support (provides win32pipe, win32file, pywintypes modules)
+pywin32>=306
+
+# Optional: Enhanced logging
+colorlog>=6.8.0
+
+# Note: After installing pywin32, you may need to run:
+# python Scripts/pywin32_postinstall.py -install

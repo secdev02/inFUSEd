@@ -1,0 +1,146 @@
+# GitHub Upload Instructions
+
+This zip file contains all files for the ProjFS MCP Integration project.
+
+## Files Included
+
+**Core Code:**
+- ProjFS-Service-MCP.cs - Main service (v1.3.2)
+- projfs_mcp_server.py - MCP server
+- ProjFS-Service-MCP.exe.config - Configuration template
+
+**Python:**
+- requirements.txt - Python dependencies
+- test_mcp.py - Connection test script
+- diagnose_pipe.py - Diagnostic tool
+- check_install.py - Installation verification
+
+**Configuration:**
+- claude_desktop_config.example.json - Claude Desktop config example
+
+**Documentation:**
+- README_for_GitHub.md - Main README (rename to README.md)
+- QUICKSTART.md - Fast setup guide
+- PERFORMANCE.md - Performance optimization guide
+- PERFORMANCE_QUICKFIX.md - Quick performance fix
+- PYTHON_INSTALL.md - Python installation help
+- PATH_FIX.md - Path normalization details
+- VERSION_HISTORY.md - Complete version history
+- FILE_SUMMARY.md - File overview
+
+## Steps to Upload to GitHub
+
+1. Extract the zip file to your local repository folder
+
+2. Rename the GitHub README:
+   ```bash
+   mv README_for_GitHub.md README.md
+   ```
+
+3. Add all files to git:
+   ```bash
+   git add .
+   ```
+
+4. Commit:
+   ```bash
+   git commit -m "Add ProjFS MCP Integration v1.3.2
+
+   - MCP integration for AI-controlled honeypot file creation
+   - Performance optimizations (v1.3.1)
+   - Path normalization fix (v1.3.2)
+   - Complete documentation and testing tools"
+   ```
+
+5. Push to GitHub:
+   ```bash
+   git push origin main
+   ```
+
+## Recommended .gitignore
+
+Add these to your .gitignore:
+
+```
+# Compiled binaries
+*.exe
+*.dll
+*.pdb
+
+# Configuration with secrets
+ProjFS-Service-MCP.exe.config
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.log
+projfs_mcp_server.log
+
+# IDE
+.vs/
+.vscode/
+*.suo
+*.user
+
+# Test outputs
+/TestMCP/
+```
+
+Note: ProjFS-Service-MCP.exe.config is included as a template but should be 
+added to .gitignore after initial commit so users don't accidentally commit 
+their AlertDomain tokens.
+
+## Repository Structure
+
+After extraction, your repository should look like:
+
+```
+/
+├── README.md (renamed from README_for_GitHub.md)
+├── QUICKSTART.md
+├── PERFORMANCE.md
+├── PERFORMANCE_QUICKFIX.md
+├── PYTHON_INSTALL.md
+├── PATH_FIX.md
+├── VERSION_HISTORY.md
+├── FILE_SUMMARY.md
+├── ProjFS-Service-MCP.cs
+├── ProjFS-Service-MCP.exe.config
+├── projfs_mcp_server.py
+├── requirements.txt
+├── test_mcp.py
+├── diagnose_pipe.py
+├── check_install.py
+└── claude_desktop_config.example.json
+```
+
+## GitHub Release Notes (Optional)
+
+Consider creating a release with these notes:
+
+**Release v1.3.2 - Path Normalization Fix**
+
+Changes:
+- Fixed path normalization issue in MCP commands
+- Files created via MCP now visible in list operations
+- Includes all performance improvements from v1.3.1
+- Production ready
+
+Previous releases:
+- v1.3.1: Performance optimizations, async MCP server
+- v1.3.0: Initial MCP integration
+
+## GitHub Topics (Suggested)
+
+Add these topics to your repository:
+- projfs
+- mcp
+- honeypot
+- windows
+- security-tools
+- file-system
+- ai-integration
+- claude
+- threat-detection
+- dns-monitoring
