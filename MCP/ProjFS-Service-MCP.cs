@@ -2,11 +2,16 @@
  * File: ProjFS-Service-MCP.cs
  * Author: Casey Smith (Modified for MCP Integration)
  * Date: 2025
- * Version: 1.3.2
+ * Version: 1.3.3
  * 
  * Description:
  *   Windows service that creates a virtual file system using the Windows
  *   Projected File System (ProjFS) API with MCP integration via Named Pipes.
+ *   
+ *   ENHANCEMENTS v1.3.3:
+ *   - Fixed XML entity encoding in config file (&#xD;&#xA; issue)
+ *   - Changed CSV delimiter from newline to semicolon
+ *   - Config file is now human-readable
  *   
  *   ENHANCEMENTS v1.3.2:
  *   - Fixed path normalization for MCP commands (\\path vs \path)
@@ -190,7 +195,7 @@ namespace WindowsFakeFileSystemService
             bool enableMCP = bool.Parse(ConfigurationManager.AppSettings["EnableMCPServer"] ?? "true");
             string mcpPipeName = ConfigurationManager.AppSettings["MCPPipeName"] ?? "ProjFS_MCP_Pipe";
             
-            Console.WriteLine("=== ProjFS Virtual File System v1.3.2 (MCP Enabled) ===");
+            Console.WriteLine("=== ProjFS Virtual File System v1.3.3 (MCP Enabled) ===");
             Console.WriteLine("Virtual Folder: " + rootPath);
             Console.WriteLine("Debug Mode: " + debugMode);
             Console.WriteLine("Auto-Save: " + autoSave);
@@ -281,7 +286,7 @@ namespace WindowsFakeFileSystemService
         
         // MCP Server
         private bool mcpRunning = false;
-        //private Thread mcpServerThread; Update 
+        private Thread mcpServerThread;
 
         public ProjFSProvider(string rootPath, string csvStr, string alertDomain, bool enableDebug, bool autoSave)
         {
@@ -607,7 +612,7 @@ namespace WindowsFakeFileSystemService
 
         private void LoadFileSystemFromCsvString(string csvStr)
         {
-            string[] lines = csvStr.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+            string[] lines = csvStr.Split(new[] { ";" }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var line in lines)
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
@@ -674,7 +679,7 @@ namespace WindowsFakeFileSystemService
                 
                 long unixTimestamp = (long)(entry.LastWriteTime.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
                 
-                csv.AppendFormat("{0},{1},{2},{3}\r\n",
+                csv.AppendFormat("{0},{1},{2},{3};",
                     path,
                     entry.IsDirectory.ToString().ToLower(),
                     entry.FileSize,
