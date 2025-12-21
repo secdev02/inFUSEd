@@ -1,5 +1,5 @@
 # inFUSEd
-Deception Based File System - Based on ProjFS - AI Capable Content Generation 
+Deception Based File System - Based on ProjFS / Minimalist WebDAV - AI Capable Content Generation 
 
 # Windows ProjFS Virtual File System Service
 
