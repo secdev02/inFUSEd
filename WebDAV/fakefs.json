@@ -1,0 +1,29 @@
+{
+  "shareRoot": "/drive",
+  "defaults": {
+    "createdUtc": "2025-12-21T18:00:00Z",
+    "modifiedUtc": "2025-12-21T18:00:00Z",
+    "contentType": "application/octet-stream",
+    "placeholderText": "This is a simulated file.\r\n"
+  },
+  "entries": [
+    { "type": "dir", "path": "/drive/" },
+    { "type": "dir", "path": "/drive/Docs/" },
+    { "type": "dir", "path": "/drive/Docs/Reports/" },
+
+    {
+      "type": "file",
+      "path": "/drive/Docs/Reports/Q4-summary.txt",
+      "modifiedUtc": "2025-12-21T17:40:00Z",
+      "contentType": "text/plain",
+      "contentText": "Q4 Summary (fake)\r\nNothing to see here.\r\n"
+    },
+
+    {
+      "type": "file",
+      "path": "/drive/bin/tool.exe",
+      "contentType": "application/octet-stream",
+      "contentBase64": "TVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  ]
+}
