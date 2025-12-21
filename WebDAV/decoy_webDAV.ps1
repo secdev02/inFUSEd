@@ -1,23 +1,28 @@
 <#
 decoy_webdav.ps1  (Minimal Fake WebDAV Server in PowerShell)
 
-- Map: net use R: http://SERVER/drive
-- Browse: dir R:\ , dir R:\docs , explorer R:\
-- Fake tree from built-in defaults + optional JSON (-ConfigPath)
+- Map a drive:   net use R: http://SERVER/drive
+- Browse:        dir R:\ , dir R:\docs , explorer R:\
+- Fake tree comes ONLY from JSON unless -DebugTree is specified
+- Optional: -DebugTree loads built-in debug tree (and can optionally layer JSON on top)
 - Logs every request to console
 
 Run (Admin recommended for port 80):
-  powershell.exe -ExecutionPolicy Bypass -File .\decoy_webdav.ps1
-
-With JSON:
   powershell.exe -ExecutionPolicy Bypass -File .\decoy_webdav.ps1 -ConfigPath .\fakefs.json
+
+Debug tree only:
+  powershell.exe -ExecutionPolicy Bypass -File .\decoy_webdav.ps1 -DebugTree
+
+Debug tree + JSON overrides/extends:
+  powershell.exe -ExecutionPolicy Bypass -File .\decoy_webdav.ps1 -DebugTree -ConfigPath .\fakefs.json
 #>
 
 param(
     [string]$ListenAddress = "+",
     [int]$Port = 80,
     [string]$ShareRoot = "/drive",
-    [string]$ConfigPath = ""
+    [string]$ConfigPath = "",
+    [switch]$DebugTree
 )
 
 Set-StrictMode -Version 2
@@ -43,6 +48,10 @@ function Get-JsonPropString {
 # ----------------------------
 # Utility helpers
 # ----------------------------
+function Clear-FakeFs {
+    $FakeFs.Clear()
+}
+
 function Normalize-ConfigPath {
     param([string]$p)
     if ([string]::IsNullOrWhiteSpace($p)) { return $p }
@@ -181,7 +190,6 @@ function Get-Children {
 
         if ($kStr -eq $dirStr) { continue }
 
-        # FIXED: valid if syntax and method call
         if ( $kStr.StartsWith($dirStr, [System.StringComparison]::OrdinalIgnoreCase) ) {
             $rest = $kStr.Substring($dirStr.Length)
             if ($rest.Length -eq 0) { continue }
@@ -248,7 +256,7 @@ function Ensure-ParentDirs {
 }
 
 # ----------------------------
-# Built-in minimal debug tree
+# Built-in minimal debug tree (ONLY used if -DebugTree)
 # ----------------------------
 function Set-BuiltInDebugTree {
     param([string]$root)
@@ -275,7 +283,7 @@ function Set-BuiltInDebugTree {
 }
 
 # ----------------------------
-# JSON import (extends/overrides built-in)
+# JSON import (build tree from JSON; can also override/extend debug tree)
 # ----------------------------
 function Import-FakeFsFromJson {
     param([string]$jsonPath, [string]$defaultRoot)
@@ -283,10 +291,11 @@ function Import-FakeFsFromJson {
     $defaultRoot = Normalize-ConfigPath $defaultRoot
     $defaultRoot = $defaultRoot.TrimEnd("/")
 
-    if ([string]::IsNullOrWhiteSpace($jsonPath)) { return $defaultRoot }
+    if ([string]::IsNullOrWhiteSpace($jsonPath)) {
+        throw "ConfigPath is required unless -DebugTree is specified."
+    }
     if (-not (Test-Path -LiteralPath $jsonPath)) {
-        Write-Host ("[Config] JSON not found: {0} (using built-in only)" -f $jsonPath) -ForegroundColor Yellow
-        return $defaultRoot
+        throw ("JSON config not found: {0}" -f $jsonPath)
     }
 
     $raw = Get-Content -LiteralPath $jsonPath -Raw
@@ -317,8 +326,7 @@ function Import-FakeFsFromJson {
 
     $entriesProp = $cfg.PSObject.Properties["entries"]
     if (-not ($entriesProp -and $entriesProp.Value)) {
-        Write-Host "[Config] No entries[] in JSON; keeping built-in tree." -ForegroundColor Yellow
-        return $root
+        throw "JSON config has no entries[]."
     }
 
     foreach ($e in $entriesProp.Value) {
@@ -443,13 +451,23 @@ function Build-PropfindResponseXml {
 }
 
 # ----------------------------
-# Build fake FS
+# Build fake FS (DebugTree only when requested; otherwise JSON-only)
 # ----------------------------
 $ShareRoot = Normalize-ConfigPath $ShareRoot
 $ShareRoot = $ShareRoot.TrimEnd("/")
 
-Set-BuiltInDebugTree -root $ShareRoot
-$ShareRoot = Import-FakeFsFromJson -jsonPath $ConfigPath -defaultRoot $ShareRoot
+if ($DebugTree) {
+    Clear-FakeFs
+    Set-BuiltInDebugTree -root $ShareRoot
+
+    # Optional JSON layered on top
+    if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
+        $ShareRoot = Import-FakeFsFromJson -jsonPath $ConfigPath -defaultRoot $ShareRoot
+    }
+} else {
+    Clear-FakeFs
+    $ShareRoot = Import-FakeFsFromJson -jsonPath $ConfigPath -defaultRoot $ShareRoot
+}
 
 # Ensure share root exists
 $ShareRootSlash = $ShareRoot + "/"
@@ -458,7 +476,7 @@ if (-not $FakeFs.ContainsKey($ShareRootSlash)) {
     Add-FakeDirEx -path $ShareRootSlash -createdUtc $nowUtc -modifiedUtc $nowUtc
 }
 
-Write-Host ("[FakeFS] Loaded {0} entries under {1}/" -f $FakeFs.Count, $ShareRoot)
+Write-Host ("[FakeFS] Loaded {0} entries under {1}/  DebugTree={2}" -f $FakeFs.Count, $ShareRoot, $DebugTree)
 
 # ----------------------------
 # Listener setup
@@ -488,7 +506,7 @@ try {
         # Normalize /drive vs /drive/
         if ($path -eq $ShareRoot) { $path = $ShareRoot + "/" }
 
-        # Root probe handling
+        # Root probe handling (Windows WebDAV often probes "/")
         if ($path -eq "/") {
             if ($req.HttpMethod -eq "OPTIONS") {
                 $resp.StatusCode = 200
