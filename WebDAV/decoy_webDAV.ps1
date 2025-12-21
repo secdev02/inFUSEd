@@ -23,11 +23,11 @@ param(
 Set-StrictMode -Version 2
 $ErrorActionPreference = "Stop"
 
-# Case-insensitive FakeFS table (fixes Docs vs docs)
+# Case-insensitive filesystem map
 $FakeFs = New-Object System.Collections.Hashtable ([System.StringComparer]::OrdinalIgnoreCase)
 
 # ----------------------------
-# Safe JSON property accessor (StrictMode-friendly)
+# StrictMode-safe JSON property accessor
 # ----------------------------
 function Get-JsonPropString {
     param(
@@ -61,7 +61,7 @@ function Normalize-Path {
 function New-BytesFromText {
     param([string]$s)
     if ($null -eq $s) { $s = "" }
-    [System.Text.Encoding]::UTF8.GetBytes($s)
+    return [System.Text.Encoding]::UTF8.GetBytes($s)
 }
 
 function Parse-UtcDateOrDefault {
@@ -73,7 +73,7 @@ function Parse-UtcDateOrDefault {
 function To-Rfc1123 {
     param([DateTime]$utc)
     if ($utc.Kind -ne [DateTimeKind]::Utc) { $utc = $utc.ToUniversalTime() }
-    $utc.ToString("R")
+    return $utc.ToString("R")
 }
 
 function Dav-CommonHeaders {
@@ -112,7 +112,7 @@ function Get-BaseUrl {
     param($req)
     $hostHeader = $req.Headers["Host"]
     if ([string]::IsNullOrWhiteSpace($hostHeader)) { return "http://localhost" }
-    "http://" + $hostHeader
+    return "http://" + $hostHeader
 }
 
 function Parse-DepthHeader {
@@ -122,31 +122,28 @@ function Parse-DepthHeader {
     if ($d -eq "infinity") { return 1 }  # keep minimal
     $n = 0
     [void][int]::TryParse($d, [ref]$n)
-    $n
+    return $n
 }
 
 # ----------------------------
-# FakeFS helpers (with slash + case tolerance)
+# FakeFS helpers (case + slash tolerant)
 # ----------------------------
 function CanonDir {
     param([string]$p)
     if (-not $p.EndsWith("/")) { $p += "/" }
-    $p
+    return $p
 }
 
 function Resolve-ExistingPath {
     param([string]$p)
 
-    # Direct match
     if ($FakeFs.ContainsKey($p)) { return $p }
 
-    # If client asked for "/x" but we store "/x/" (directory), try with slash
     if (-not $p.EndsWith("/")) {
         $p2 = $p + "/"
         if ($FakeFs.ContainsKey($p2)) { return $p2 }
     }
 
-    # If client asked for "/x/" but we store "/x" (shouldn't happen), try without
     if ($p.EndsWith("/")) {
         $p3 = $p.TrimEnd("/")
         if ($FakeFs.ContainsKey($p3)) { return $p3 }
@@ -159,14 +156,14 @@ function Is-Dir {
     param([string]$path)
     $rp = Resolve-ExistingPath $path
     if ($null -eq $rp) { return $false }
-    $FakeFs[$rp].Type -eq "dir"
+    return ($FakeFs[$rp].Type -eq "dir")
 }
 
 function Is-File {
     param([string]$path)
     $rp = Resolve-ExistingPath $path
     if ($null -eq $rp) { return $false }
-    $FakeFs[$rp].Type -eq "file"
+    return ($FakeFs[$rp].Type -eq "file")
 }
 
 function Get-Children {
@@ -177,20 +174,26 @@ function Get-Children {
     if ($null -eq $dirKey) { return @() }
 
     $children = New-Object System.Collections.Generic.List[string]
-    foreach ($k in $FakeFs.Keys) {
-        if ([string]$k -eq [string]$dirKey) { continue }
 
-        # Case-insensitive startswith
-        if ([string]$k).StartsWith([string]$dirKey, [System.StringComparison]::OrdinalIgnoreCase) {
-            $rest = ([string]$k).Substring(([string]$dirKey).Length)
+    foreach ($k in $FakeFs.Keys) {
+        $kStr = [string]$k
+        $dirStr = [string]$dirKey
+
+        if ($kStr -eq $dirStr) { continue }
+
+        # FIXED: valid if syntax and method call
+        if ( $kStr.StartsWith($dirStr, [System.StringComparison]::OrdinalIgnoreCase) ) {
+            $rest = $kStr.Substring($dirStr.Length)
             if ($rest.Length -eq 0) { continue }
+
             $restTrim = $rest.TrimEnd("/")
             if ($restTrim -notmatch "/") {
-                $children.Add([string]$k) | Out-Null
+                $children.Add($kStr) | Out-Null
             }
         }
     }
-    $children
+
+    return $children
 }
 
 function Add-FakeDirEx {
@@ -268,11 +271,6 @@ function Set-BuiltInDebugTree {
     Add-FakeFileEx -path ($root + "/Docs/Reports/Q4-summary.txt") `
         -contentType "text/plain" `
         -contentBytes (New-BytesFromText "Q4 Summary (fake).`r`nNothing to see here.`r`n") `
-        -createdUtc $nowUtc -modifiedUtc $nowUtc
-
-    Add-FakeFileEx -path ($root + "/Tools/setup.ps1") `
-        -contentType "text/plain" `
-        -contentBytes (New-BytesFromText "Write-Host 'Hello from a fake file.'`r`n") `
         -createdUtc $nowUtc -modifiedUtc $nowUtc
 }
 
@@ -374,7 +372,7 @@ function Import-FakeFsFromJson {
 # PROPFIND response builder
 # ----------------------------
 function Build-PropfindResponseXml {
-    param([string]$baseUrl, [string]$path, [int]$depth)
+    param([string]$path, [int]$depth)
 
     $resolved = Resolve-ExistingPath $path
     if ($null -eq $resolved) { return $null }
@@ -389,8 +387,8 @@ function Build-PropfindResponseXml {
         $p = Resolve-ExistingPath $p0
         if ($null -eq $p) { return }
 
-        $isDir = $FakeFs[$p].Type -eq "dir"
-        $isFile = $FakeFs[$p].Type -eq "file"
+        $isDir = ($FakeFs[$p].Type -eq "dir")
+        $isFile = ($FakeFs[$p].Type -eq "file")
         if (-not ($isDir -or $isFile)) { return }
 
         $href = $p
@@ -441,7 +439,7 @@ function Build-PropfindResponseXml {
     }
 
     [void]$sb.Append("</D:multistatus>")
-    $sb.ToString()
+    return $sb.ToString()
 }
 
 # ----------------------------
@@ -490,7 +488,7 @@ try {
         # Normalize /drive vs /drive/
         if ($path -eq $ShareRoot) { $path = $ShareRoot + "/" }
 
-        # ---- Root probe handling ----
+        # Root probe handling
         if ($path -eq "/") {
             if ($req.HttpMethod -eq "OPTIONS") {
                 $resp.StatusCode = 200
@@ -537,9 +535,8 @@ try {
             }
 
             if ($req.HttpMethod -eq "GET") {
-                $loc = $ShareRoot + "/"
                 $resp.StatusCode = 302
-                $resp.Headers["Location"] = $loc
+                $resp.Headers["Location"] = ($ShareRoot + "/")
                 $resp.Close()
                 continue
             }
@@ -547,7 +544,6 @@ try {
             Send-Text $resp 405 "text/plain; charset=utf-8" ("Method not allowed: " + $req.HttpMethod)
             continue
         }
-        # ---- End root probe handling ----
 
         if ($req.HttpMethod -eq "OPTIONS") {
             $resp.StatusCode = 200
@@ -557,35 +553,15 @@ try {
             continue
         }
 
-        if ($req.HttpMethod -eq "HEAD") {
-            $rp = Resolve-ExistingPath $path
-            if ($null -ne $rp -and (Is-File $rp)) {
-                $resp.StatusCode = 200
-                $resp.ContentType = [string]$FakeFs[$rp].ContentType
-                $resp.ContentLength64 = [int64]$FakeFs[$rp].Size
-            } elseif ($null -ne $rp -and (Is-Dir $rp)) {
-                $resp.StatusCode = 200
-                $resp.ContentType = "httpd/unix-directory"
-                $resp.ContentLength64 = 0
-            } else {
-                $resp.StatusCode = 404
-                $resp.ContentLength64 = 0
-            }
-            $resp.Close()
-            continue
-        }
-
         if ($req.HttpMethod -eq "PROPFIND") {
             $depth = Parse-DepthHeader $req
-
             $rp = Resolve-ExistingPath $path
             if ($null -eq $rp) {
                 Send-Text $resp 404 "text/plain; charset=utf-8" "Not found"
                 continue
             }
 
-            $baseUrl = Get-BaseUrl $req
-            $xml = Build-PropfindResponseXml $baseUrl $rp $depth
+            $xml = Build-PropfindResponseXml $rp $depth
             if ($null -eq $xml) {
                 Send-Text $resp 404 "text/plain; charset=utf-8" "Not found"
                 continue
@@ -595,6 +571,23 @@ try {
             continue
         }
 
+        if ($req.HttpMethod -eq "GET") {
+            $rp = Resolve-ExistingPath $path
+            if ($null -ne $rp -and (Is-File $rp)) {
+                $bytes = [byte[]]$FakeFs[$rp].ContentBytes
+                $ctype = [string]$FakeFs[$rp].ContentType
+                Send-Bytes $resp 200 $ctype $bytes
+                continue
+            }
+            if ($null -ne $rp -and (Is-Dir $rp)) {
+                Send-Text $resp 403 "text/plain; charset=utf-8" "Directory listing via PROPFIND only."
+                continue
+            }
+            Send-Text $resp 404 "text/plain; charset=utf-8" "Not found"
+            continue
+        }
+
+        # Minimal LOCK/UNLOCK support
         if ($req.HttpMethod -eq "LOCK") {
             $token = "opaquelocktoken:" + ([Guid]::NewGuid().ToString())
             $resp.StatusCode = 200
@@ -616,22 +609,6 @@ try {
         if ($req.HttpMethod -eq "UNLOCK") {
             $resp.StatusCode = 204
             $resp.Close()
-            continue
-        }
-
-        if ($req.HttpMethod -eq "GET") {
-            $rp = Resolve-ExistingPath $path
-            if ($null -ne $rp -and (Is-File $rp)) {
-                $bytes = [byte[]]$FakeFs[$rp].ContentBytes
-                $ctype = [string]$FakeFs[$rp].ContentType
-                Send-Bytes $resp 200 $ctype $bytes
-                continue
-            }
-            if ($null -ne $rp -and (Is-Dir $rp)) {
-                Send-Text $resp 403 "text/plain; charset=utf-8" "Directory listing via PROPFIND only."
-                continue
-            }
-            Send-Text $resp 404 "text/plain; charset=utf-8" "Not found"
             continue
         }
 
