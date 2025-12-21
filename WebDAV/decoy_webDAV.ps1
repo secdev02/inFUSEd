@@ -1,21 +1,16 @@
 <#
 decoy_webdav.ps1  (Minimal Fake WebDAV Server in PowerShell)
 
-Goals:
-- Map a drive:   net use Z: http://SERVER/drive
-- Enumerate via Explorer / dir / ls
-- Present a fake tree (built-in minimal defaults)
-- Optionally load/override from JSON (-ConfigPath)
-- Log every request attempt to console (method/url/depth/ua)
+- Map: net use R: http://SERVER/drive
+- Browse: dir R:\ , dir R:\docs , explorer R:\
+- Fake tree from built-in defaults + optional JSON (-ConfigPath)
+- Logs every request to console
 
 Run (Admin recommended for port 80):
   powershell.exe -ExecutionPolicy Bypass -File .\decoy_webdav.ps1
 
 With JSON:
   powershell.exe -ExecutionPolicy Bypass -File .\decoy_webdav.ps1 -ConfigPath .\fakefs.json
-
-Notes:
-- Windows WebDAV client (WebClient + MiniRedir) is picky; this script handles "/" probes and "/drive" vs "/drive/".
 #>
 
 param(
@@ -28,17 +23,22 @@ param(
 Set-StrictMode -Version 2
 $ErrorActionPreference = "Stop"
 
+# Case-insensitive FakeFS table (fixes Docs vs docs)
+$FakeFs = New-Object System.Collections.Hashtable ([System.StringComparer]::OrdinalIgnoreCase)
+
 # ----------------------------
-# Fake filesystem storage
+# Safe JSON property accessor (StrictMode-friendly)
 # ----------------------------
-# Key: full DAV path, e.g. "/drive/Docs/" or "/drive/readme.txt"
-# Value: hashtable with:
-#   Type = "dir" | "file"
-#   Name
-#   CreatedUtc (DateTime)
-#   ModifiedUtc (DateTime)
-#   For files: ContentType, ContentBytes, Size
-$FakeFs = @{}
+function Get-JsonPropString {
+    param(
+        [Parameter(Mandatory=$true)]$obj,
+        [Parameter(Mandatory=$true)][string]$name
+    )
+    $p = $obj.PSObject.Properties[$name]
+    if ($null -eq $p) { return $null }
+    if ($null -eq $p.Value) { return $null }
+    return [string]$p.Value
+}
 
 # ----------------------------
 # Utility helpers
@@ -67,11 +67,7 @@ function New-BytesFromText {
 function Parse-UtcDateOrDefault {
     param([string]$iso, [DateTime]$defaultUtc)
     if ([string]::IsNullOrWhiteSpace($iso)) { return $defaultUtc }
-    try {
-        return ([DateTimeOffset]::Parse($iso)).UtcDateTime
-    } catch {
-        return $defaultUtc
-    }
+    try { return ([DateTimeOffset]::Parse($iso)).UtcDateTime } catch { return $defaultUtc }
 }
 
 function To-Rfc1123 {
@@ -82,7 +78,6 @@ function To-Rfc1123 {
 
 function Dav-CommonHeaders {
     param($resp)
-    # These headers help Windows WebDAV mini-redirector behave.
     $resp.Headers["DAV"] = "1,2"
     $resp.Headers["MS-Author-Via"] = "DAV"
     $resp.Headers["Accept-Ranges"] = "bytes"
@@ -98,12 +93,7 @@ function Write-Log {
 }
 
 function Send-Bytes {
-    param(
-        $resp,
-        [int]$code,
-        [string]$contentType,
-        [byte[]]$bytes
-    )
+    param($resp, [int]$code, [string]$contentType, [byte[]]$bytes)
     $resp.StatusCode = $code
     if ($contentType) { $resp.ContentType = $contentType }
     $resp.ContentLength64 = $bytes.Length
@@ -113,19 +103,13 @@ function Send-Bytes {
 }
 
 function Send-Text {
-    param(
-        $resp,
-        [int]$code,
-        [string]$contentType,
-        [string]$text
-    )
+    param($resp, [int]$code, [string]$contentType, [string]$text)
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
     Send-Bytes $resp $code $contentType $bytes
 }
 
 function Get-BaseUrl {
     param($req)
-    # Do NOT use $host/$Host (read-only automatic variable). Use $hostHeader instead.
     $hostHeader = $req.Headers["Host"]
     if ([string]::IsNullOrWhiteSpace($hostHeader)) { return "http://localhost" }
     "http://" + $hostHeader
@@ -135,35 +119,74 @@ function Parse-DepthHeader {
     param($req)
     $d = $req.Headers["Depth"]
     if ([string]::IsNullOrWhiteSpace($d)) { return 0 }
-    if ($d -eq "infinity") { return 1 } # keep minimal
+    if ($d -eq "infinity") { return 1 }  # keep minimal
     $n = 0
     [void][int]::TryParse($d, [ref]$n)
     $n
 }
 
+# ----------------------------
+# FakeFS helpers (with slash + case tolerance)
+# ----------------------------
+function CanonDir {
+    param([string]$p)
+    if (-not $p.EndsWith("/")) { $p += "/" }
+    $p
+}
+
+function Resolve-ExistingPath {
+    param([string]$p)
+
+    # Direct match
+    if ($FakeFs.ContainsKey($p)) { return $p }
+
+    # If client asked for "/x" but we store "/x/" (directory), try with slash
+    if (-not $p.EndsWith("/")) {
+        $p2 = $p + "/"
+        if ($FakeFs.ContainsKey($p2)) { return $p2 }
+    }
+
+    # If client asked for "/x/" but we store "/x" (shouldn't happen), try without
+    if ($p.EndsWith("/")) {
+        $p3 = $p.TrimEnd("/")
+        if ($FakeFs.ContainsKey($p3)) { return $p3 }
+    }
+
+    return $null
+}
+
 function Is-Dir {
     param([string]$path)
-    $FakeFs.ContainsKey($path) -and $FakeFs[$path].Type -eq "dir"
+    $rp = Resolve-ExistingPath $path
+    if ($null -eq $rp) { return $false }
+    $FakeFs[$rp].Type -eq "dir"
 }
 
 function Is-File {
     param([string]$path)
-    $FakeFs.ContainsKey($path) -and $FakeFs[$path].Type -eq "file"
+    $rp = Resolve-ExistingPath $path
+    if ($null -eq $rp) { return $false }
+    $FakeFs[$rp].Type -eq "file"
 }
 
 function Get-Children {
     param([string]$dirPath)
-    if (-not $dirPath.EndsWith("/")) { $dirPath += "/" }
+
+    $dirPath = CanonDir $dirPath
+    $dirKey = Resolve-ExistingPath $dirPath
+    if ($null -eq $dirKey) { return @() }
 
     $children = New-Object System.Collections.Generic.List[string]
     foreach ($k in $FakeFs.Keys) {
-        if ($k -eq $dirPath) { continue }
-        if ($k.StartsWith($dirPath)) {
-            $rest = $k.Substring($dirPath.Length)
+        if ([string]$k -eq [string]$dirKey) { continue }
+
+        # Case-insensitive startswith
+        if ([string]$k).StartsWith([string]$dirKey, [System.StringComparison]::OrdinalIgnoreCase) {
+            $rest = ([string]$k).Substring(([string]$dirKey).Length)
             if ($rest.Length -eq 0) { continue }
             $restTrim = $rest.TrimEnd("/")
             if ($restTrim -notmatch "/") {
-                $children.Add($k) | Out-Null
+                $children.Add([string]$k) | Out-Null
             }
         }
     }
@@ -171,12 +194,8 @@ function Get-Children {
 }
 
 function Add-FakeDirEx {
-    param(
-        [string]$path,
-        [DateTime]$createdUtc,
-        [DateTime]$modifiedUtc
-    )
-    if (-not $path.EndsWith("/")) { $path += "/" }
+    param([string]$path, [DateTime]$createdUtc, [DateTime]$modifiedUtc)
+    $path = CanonDir $path
     $FakeFs[$path] = @{
         Type = "dir"
         Name = ($path.TrimEnd("/") -split "/")[-1]
@@ -186,13 +205,7 @@ function Add-FakeDirEx {
 }
 
 function Add-FakeFileEx {
-    param(
-        [string]$path,
-        [string]$contentType,
-        [byte[]]$contentBytes,
-        [DateTime]$createdUtc,
-        [DateTime]$modifiedUtc
-    )
+    param([string]$path, [string]$contentType, [byte[]]$contentBytes, [DateTime]$createdUtc, [DateTime]$modifiedUtc)
     $FakeFs[$path] = @{
         Type = "file"
         Name = ($path -split "/")[-1]
@@ -241,6 +254,7 @@ function Set-BuiltInDebugTree {
     $root = $root.TrimEnd("/")
 
     $nowUtc = [DateTime]::UtcNow
+
     Add-FakeDirEx  -path ($root + "/")              -createdUtc $nowUtc -modifiedUtc $nowUtc
     Add-FakeDirEx  -path ($root + "/Docs/")         -createdUtc $nowUtc -modifiedUtc $nowUtc
     Add-FakeDirEx  -path ($root + "/Tools/")        -createdUtc $nowUtc -modifiedUtc $nowUtc
@@ -253,7 +267,7 @@ function Set-BuiltInDebugTree {
 
     Add-FakeFileEx -path ($root + "/Docs/Reports/Q4-summary.txt") `
         -contentType "text/plain" `
-        -contentBytes (New-BytesFromText "Q4 Summary (fake).`r`n") `
+        -contentBytes (New-BytesFromText "Q4 Summary (fake).`r`nNothing to see here.`r`n") `
         -createdUtc $nowUtc -modifiedUtc $nowUtc
 
     Add-FakeFileEx -path ($root + "/Tools/setup.ps1") `
@@ -266,10 +280,7 @@ function Set-BuiltInDebugTree {
 # JSON import (extends/overrides built-in)
 # ----------------------------
 function Import-FakeFsFromJson {
-    param(
-        [string]$jsonPath,
-        [string]$defaultRoot
-    )
+    param([string]$jsonPath, [string]$defaultRoot)
 
     $defaultRoot = Normalize-ConfigPath $defaultRoot
     $defaultRoot = $defaultRoot.TrimEnd("/")
@@ -284,66 +295,73 @@ function Import-FakeFsFromJson {
     $cfg = $raw | ConvertFrom-Json
 
     $root = $defaultRoot
-    if ($cfg.shareRoot) { $root = Normalize-ConfigPath ([string]$cfg.shareRoot) }
+    $sr = Get-JsonPropString $cfg "shareRoot"
+    if (-not [string]::IsNullOrWhiteSpace($sr)) { $root = Normalize-ConfigPath $sr }
     $root = $root.TrimEnd("/")
 
-    $defaultsCreated = [DateTime]::UtcNow
+    $defaultsCreated  = [DateTime]::UtcNow
     $defaultsModified = [DateTime]::UtcNow
     $defaultsType = "application/octet-stream"
     $placeholderText = "This is a simulated file.`r`n"
 
-    if ($cfg.defaults) {
-        $defaultsCreated = Parse-UtcDateOrDefault ([string]$cfg.defaults.createdUtc) $defaultsCreated
-        $defaultsModified = Parse-UtcDateOrDefault ([string]$cfg.defaults.modifiedUtc) $defaultsModified
-        if ($cfg.defaults.contentType) { $defaultsType = [string]$cfg.defaults.contentType }
-        if ($cfg.defaults.placeholderText) { $placeholderText = [string]$cfg.defaults.placeholderText }
+    $defaultsObj = $cfg.PSObject.Properties["defaults"]
+    if ($defaultsObj -and $defaultsObj.Value) {
+        $d = $defaultsObj.Value
+        $defaultsCreated  = Parse-UtcDateOrDefault (Get-JsonPropString $d "createdUtc")  $defaultsCreated
+        $defaultsModified = Parse-UtcDateOrDefault (Get-JsonPropString $d "modifiedUtc") $defaultsModified
+
+        $ct = Get-JsonPropString $d "contentType"
+        if (-not [string]::IsNullOrWhiteSpace($ct)) { $defaultsType = $ct }
+
+        $pt = Get-JsonPropString $d "placeholderText"
+        if (-not [string]::IsNullOrWhiteSpace($pt)) { $placeholderText = $pt }
     }
 
-    if (-not $cfg.entries) {
+    $entriesProp = $cfg.PSObject.Properties["entries"]
+    if (-not ($entriesProp -and $entriesProp.Value)) {
         Write-Host "[Config] No entries[] in JSON; keeping built-in tree." -ForegroundColor Yellow
         return $root
     }
 
-    foreach ($e in $cfg.entries) {
-        if (-not $e.path -or -not $e.type) { continue }
+    foreach ($e in $entriesProp.Value) {
+        $etype = Get-JsonPropString $e "type"
+        $epath = Get-JsonPropString $e "path"
+        if ([string]::IsNullOrWhiteSpace($etype) -or [string]::IsNullOrWhiteSpace($epath)) { continue }
 
-        $p = Normalize-ConfigPath ([string]$e.path)
+        $p = Normalize-ConfigPath $epath
 
-        # If caller forgot /drive prefix but provided a relative path, attach to root
-        if (-not $p.StartsWith("/")) { $p = "/" + $p }
-        if (-not $p.StartsWith($root + "/") -and $p -notmatch "^/") {
-            $p = $root + "/" + $p.TrimStart("/")
-        }
+        $created  = Parse-UtcDateOrDefault (Get-JsonPropString $e "createdUtc")  $defaultsCreated
+        $modified = Parse-UtcDateOrDefault (Get-JsonPropString $e "modifiedUtc") $defaultsModified
 
-        $created = Parse-UtcDateOrDefault ([string]$e.createdUtc) $defaultsCreated
-        $modified = Parse-UtcDateOrDefault ([string]$e.modifiedUtc) $defaultsModified
-
-        if ([string]$e.type -eq "dir") {
+        if ($etype -eq "dir") {
             Ensure-ParentDirs -fileOrDirPath $p -createdUtc $created -modifiedUtc $modified
             Add-FakeDirEx -path $p -createdUtc $created -modifiedUtc $modified
             continue
         }
 
-        if ([string]$e.type -eq "file") {
+        if ($etype -eq "file") {
             Ensure-ParentDirs -fileOrDirPath $p -createdUtc $created -modifiedUtc $modified
 
             $ctype = $defaultsType
-            if ($e.contentType) { $ctype = [string]$e.contentType }
+            $ct2 = Get-JsonPropString $e "contentType"
+            if (-not [string]::IsNullOrWhiteSpace($ct2)) { $ctype = $ct2 }
 
             $bytes = $null
-            if ($e.contentBase64) {
-                try { $bytes = [Convert]::FromBase64String([string]$e.contentBase64) } catch { $bytes = $null }
+            $b64 = Get-JsonPropString $e "contentBase64"
+            if (-not [string]::IsNullOrWhiteSpace($b64)) {
+                try { $bytes = [Convert]::FromBase64String($b64) } catch { $bytes = $null }
             }
             if ($null -eq $bytes) {
-                if ($e.contentText) { $bytes = New-BytesFromText ([string]$e.contentText) }
+                $txt = Get-JsonPropString $e "contentText"
+                if (-not [string]::IsNullOrWhiteSpace($txt)) { $bytes = New-BytesFromText $txt }
                 else { $bytes = New-BytesFromText $placeholderText }
             }
 
             Add-FakeFileEx -path $p -contentType $ctype -contentBytes $bytes -createdUtc $created -modifiedUtc $modified
 
-            # If JSON provided a "size", treat it as reported size (optional)
-            if ($e.size) {
-                try { $FakeFs[$p].Size = [int64]$e.size } catch {}
+            $sizeStr = Get-JsonPropString $e "size"
+            if (-not [string]::IsNullOrWhiteSpace($sizeStr)) {
+                try { $FakeFs[$p].Size = [int64]$sizeStr } catch {}
             }
             continue
         }
@@ -356,21 +374,23 @@ function Import-FakeFsFromJson {
 # PROPFIND response builder
 # ----------------------------
 function Build-PropfindResponseXml {
-    param(
-        [string]$baseUrl,
-        [string]$path,
-        [int]$depth
-    )
+    param([string]$baseUrl, [string]$path, [int]$depth)
+
+    $resolved = Resolve-ExistingPath $path
+    if ($null -eq $resolved) { return $null }
 
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.Append('<?xml version="1.0" encoding="utf-8"?>')
     [void]$sb.Append('<D:multistatus xmlns:D="DAV:">')
 
     function Append-Response {
-        param([string]$p)
+        param([string]$p0)
 
-        $isDir = Is-Dir $p
-        $isFile = Is-File $p
+        $p = Resolve-ExistingPath $p0
+        if ($null -eq $p) { return }
+
+        $isDir = $FakeFs[$p].Type -eq "dir"
+        $isFile = $FakeFs[$p].Type -eq "file"
         if (-not ($isDir -or $isFile)) { return }
 
         $href = $p
@@ -390,7 +410,7 @@ function Build-PropfindResponseXml {
             $contentType = "httpd/unix-directory"
             $contentLength = "0"
         } else {
-            $contentType = $FakeFs[$p].ContentType
+            $contentType = [string]$FakeFs[$p].ContentType
             $contentLength = [string]$FakeFs[$p].Size
         }
 
@@ -413,10 +433,10 @@ function Build-PropfindResponseXml {
         [void]$sb.Append("</D:response>")
     }
 
-    Append-Response $path
+    Append-Response $resolved
 
-    if ($depth -ge 1 -and (Is-Dir $path)) {
-        $kids = Get-Children $path
+    if ($depth -ge 1 -and (Is-Dir $resolved)) {
+        $kids = Get-Children $resolved
         foreach ($k in $kids) { Append-Response $k }
     }
 
@@ -425,9 +445,7 @@ function Build-PropfindResponseXml {
 }
 
 # ----------------------------
-# Build fake FS:
-# 1) built-in debug tree
-# 2) optional JSON import extends/overrides
+# Build fake FS
 # ----------------------------
 $ShareRoot = Normalize-ConfigPath $ShareRoot
 $ShareRoot = $ShareRoot.TrimEnd("/")
@@ -435,7 +453,7 @@ $ShareRoot = $ShareRoot.TrimEnd("/")
 Set-BuiltInDebugTree -root $ShareRoot
 $ShareRoot = Import-FakeFsFromJson -jsonPath $ConfigPath -defaultRoot $ShareRoot
 
-# Ensure share root exists even if JSON omitted it
+# Ensure share root exists
 $ShareRootSlash = $ShareRoot + "/"
 if (-not $FakeFs.ContainsKey($ShareRootSlash)) {
     $nowUtc = [DateTime]::UtcNow
@@ -452,7 +470,7 @@ $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add($prefix)
 
 Write-Host ("Listening on {0}" -f $prefix)
-Write-Host ("Fake WebDAV root: {0}/ (map: net use Z: http://HOST:{1}{0})" -f $ShareRoot, $Port)
+Write-Host ("Fake WebDAV root: {0}/ (map: net use R: http://HOST:{1}{0})" -f $ShareRoot, $Port)
 Write-Host ("Press Ctrl+C to stop.")
 Write-Host ""
 
@@ -472,7 +490,7 @@ try {
         # Normalize /drive vs /drive/
         if ($path -eq $ShareRoot) { $path = $ShareRoot + "/" }
 
-        # ---- Root probe handling: Windows WebDAV often probes "/" first ----
+        # ---- Root probe handling ----
         if ($path -eq "/") {
             if ($req.HttpMethod -eq "OPTIONS") {
                 $resp.StatusCode = 200
@@ -519,7 +537,6 @@ try {
             }
 
             if ($req.HttpMethod -eq "GET") {
-                # Redirect browsers / explorers to the actual share root
                 $loc = $ShareRoot + "/"
                 $resp.StatusCode = 302
                 $resp.Headers["Location"] = $loc
@@ -532,7 +549,6 @@ try {
         }
         # ---- End root probe handling ----
 
-        # OPTIONS responder for DAV negotiation
         if ($req.HttpMethod -eq "OPTIONS") {
             $resp.StatusCode = 200
             $resp.Headers["Allow"] = "OPTIONS, GET, HEAD, PROPFIND, LOCK, UNLOCK"
@@ -541,13 +557,13 @@ try {
             continue
         }
 
-        # HEAD is used sometimes
         if ($req.HttpMethod -eq "HEAD") {
-            if (Is-File $path) {
+            $rp = Resolve-ExistingPath $path
+            if ($null -ne $rp -and (Is-File $rp)) {
                 $resp.StatusCode = 200
-                $resp.ContentType = $FakeFs[$path].ContentType
-                $resp.ContentLength64 = [int64]$FakeFs[$path].Size
-            } elseif (Is-Dir $path) {
+                $resp.ContentType = [string]$FakeFs[$rp].ContentType
+                $resp.ContentLength64 = [int64]$FakeFs[$rp].Size
+            } elseif ($null -ne $rp -and (Is-Dir $rp)) {
                 $resp.StatusCode = 200
                 $resp.ContentType = "httpd/unix-directory"
                 $resp.ContentLength64 = 0
@@ -559,20 +575,26 @@ try {
             continue
         }
 
-        # Directory listing / properties
         if ($req.HttpMethod -eq "PROPFIND") {
             $depth = Parse-DepthHeader $req
-            if (Is-Dir $path -or Is-File $path) {
-                $baseUrl = Get-BaseUrl $req
-                $xml = Build-PropfindResponseXml $baseUrl $path $depth
-                Send-Text $resp 207 "text/xml; charset=utf-8" $xml
+
+            $rp = Resolve-ExistingPath $path
+            if ($null -eq $rp) {
+                Send-Text $resp 404 "text/plain; charset=utf-8" "Not found"
                 continue
             }
-            Send-Text $resp 404 "text/plain; charset=utf-8" "Not found"
+
+            $baseUrl = Get-BaseUrl $req
+            $xml = Build-PropfindResponseXml $baseUrl $rp $depth
+            if ($null -eq $xml) {
+                Send-Text $resp 404 "text/plain; charset=utf-8" "Not found"
+                continue
+            }
+
+            Send-Text $resp 207 "text/xml; charset=utf-8" $xml
             continue
         }
 
-        # LOCK/UNLOCK: Windows often does this while mapping
         if ($req.HttpMethod -eq "LOCK") {
             $token = "opaquelocktoken:" + ([Guid]::NewGuid().ToString())
             $resp.StatusCode = 200
@@ -597,15 +619,15 @@ try {
             continue
         }
 
-        # GET returns dummy content for files; for dirs, tell client to use PROPFIND
         if ($req.HttpMethod -eq "GET") {
-            if (Is-File $path) {
-                $bytes = [byte[]]$FakeFs[$path].ContentBytes
-                $ctype = [string]$FakeFs[$path].ContentType
+            $rp = Resolve-ExistingPath $path
+            if ($null -ne $rp -and (Is-File $rp)) {
+                $bytes = [byte[]]$FakeFs[$rp].ContentBytes
+                $ctype = [string]$FakeFs[$rp].ContentType
                 Send-Bytes $resp 200 $ctype $bytes
                 continue
             }
-            if (Is-Dir $path) {
+            if ($null -ne $rp -and (Is-Dir $rp)) {
                 Send-Text $resp 403 "text/plain; charset=utf-8" "Directory listing via PROPFIND only."
                 continue
             }
@@ -613,7 +635,6 @@ try {
             continue
         }
 
-        # Anything else
         Send-Text $resp 405 "text/plain; charset=utf-8" ("Method not allowed: " + $req.HttpMethod)
     }
 }
