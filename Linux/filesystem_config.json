@@ -1,0 +1,40 @@
+{
+  "files": [
+    {
+      "path": "/readme.txt",
+      "content": "Corporate file share - Q4 2024\nContact IT for access issues"
+    },
+    {
+      "path": "/financials/Q4_report.xlsx",
+      "content": "CONFIDENTIAL - Q4 Financial Report\nRevenue: $2.4M\nExpenses: $1.8M"
+    },
+    {
+      "path": "/financials/budget_2025.pdf",
+      "content": "2025 Budget Planning Document\nDepartment allocations and forecasts"
+    },
+    {
+      "path": "/hr/employees.csv",
+      "content": "Employee,Department,Salary\nJohn Smith,Engineering,95000\nJane Doe,Marketing,87000"
+    },
+    {
+      "path": "/hr/policies/vacation_policy.docx",
+      "content": "Vacation Policy 2024\n15 days PTO + 10 holidays"
+    },
+    {
+      "path": "/projects/phoenix/specs.txt",
+      "content": "Project Phoenix - Technical Specifications\nLaunch Date: Q1 2025"
+    },
+    {
+      "path": "/projects/phoenix/credentials.txt",
+      "content": "DB Server: db.internal.corp\nUsername: admin\nPassword: P@ssw0rd123"
+    },
+    {
+      "path": "/shared/meeting_notes.txt",
+      "content": "Team Meeting Notes - Dec 2024\n- Q4 targets exceeded\n- New hires starting January"
+    },
+    {
+      "path": "/IT/backup_scripts/backup.sh",
+      "content": "#!/bin/bash\nrsync -av /data /backup\necho 'Backup complete'"
+    }
+  ]
+}
