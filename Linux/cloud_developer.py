@@ -242,4 +242,7 @@
     },
     {
       "path": "/ssh_keys/production/deploy_key",
-      "content": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdzc2gtcn\nNhAAAAAwEAAQAAAYEAzJu6QT6gL1lO2qUxRnM+z4gStKrLy9t5uP8+0Sb7rZaNzNy3xNnL\n1qP3sTu9WpYzT1
+      "content": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdzc2gtcn\nNhAAAAAwEAAQAAAYEAzJu6QT6gL1lO2qUxRnM+z4gStKrLy9t5uP8+0Sb7rZaNzNy3xNnL\n-----END OPENSSH PRIVATE KEY-----"
+    }
+  ]
+}
